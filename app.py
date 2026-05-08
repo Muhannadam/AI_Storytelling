@@ -790,8 +790,39 @@ with tab_story:
     if story_data is None:
         st.info("Your story will appear here after generation.")
     else:
-        story_md = build_story_markdown(story_data)
-        st.markdown(story_md)
+        
+        st.markdown(f"# {story_data.get('title', 'Generated Story')}")
+        st.markdown(f"> **Moral / Value:** {story_data.get('moral', '')}")
+        st.markdown("---")
+
+        
+        scenes = story_data.get("scenes", [])
+        
+        for idx, scene in enumerate(scenes):
+            st.markdown(
+                f"## Scene {scene.get('scene_number')}: {scene.get('title')}"
+            )
+            
+            col_text, col_image = st.columns([1, 1])
+            
+            with col_text:
+                st.markdown(scene.get("narrative", ""))
+            
+            with col_image:
+                if images_with_captions and idx < len(images_with_captions):
+                    item = images_with_captions[idx]
+                    st.image(
+                        item["image"],
+                        caption=item["caption"],
+                        use_container_width=True
+                    )
+                    
+                    with st.expander("View image prompt"):
+                        st.write(item["prompt"])
+                else:
+                    st.info("Image not available")
+            
+            st.markdown("---")
 
 
 # =========================================================
