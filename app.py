@@ -339,7 +339,7 @@ Write the full story now.
 # =========================================================
 # IMAGE GENERATION
 # =========================================================
-'''def generate_image_hf(prompt: str):
+"""def generate_image_hf(prompt: str):
     """
     Generate image using Hugging Face InferenceClient.
     """
@@ -360,7 +360,7 @@ def create_placeholder_image() -> Image.Image:
     Placeholder image if HF image generation fails.
     """
     image = Image.new("RGB", (768, 512), color=(210, 210, 230))
-    return image'''
+    return image"""
 import requests
 from urllib.parse import quote
 
