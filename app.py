@@ -339,19 +339,6 @@ Write the full story now.
 # =========================================================
 # IMAGE GENERATION
 # =========================================================
-"""
-def generate_image_hf(prompt: str):
-    try:
-        image = hf_client.text_to_image(
-            prompt,
-            model="Kwai-Kolors/Kolors"
-        )
-        return image.convert("RGB")
-
-    except Exception as e:
-        st.warning(f"Image generation failed: {e}")
-        return None"""
-
 import requests
 from urllib.parse import quote
 
