@@ -346,7 +346,7 @@ def generate_image_hf(prompt: str):
     try:
         image = hf_client.text_to_image(
             prompt,
-            model="black-forest-labs/FLUX.1-schnell"
+            model="stabilityai/stable-diffusion-xl-base-1.0"
         )
         return image.convert("RGB")
 
