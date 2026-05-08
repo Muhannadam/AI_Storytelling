@@ -4,12 +4,13 @@ import json
 import base64
 from io import BytesIO
 from zipfile import ZipFile
-
 import streamlit as st
 from PIL import Image
 from groq import Groq
 from huggingface_hub import InferenceClient
-
+import time
+import torch
+from transformers import CLIPProcessor, CLIPModel
 
 # =========================================================
 # STREAMLIT PAGE CONFIG
@@ -145,6 +146,24 @@ def load_hf_client(api_key: str):
 
 groq_client = load_groq_client(GROQ_API_KEY)
 hf_client = load_hf_client(HF_TOKEN)
+
+# =========================================================
+# CLIP MODEL FOR IMAGE EVALUATION
+# =========================================================
+@st.cache_resource
+def load_clip_model():
+    """
+    Load CLIP model for image-text alignment evaluation.
+    Cached to avoid reloading on every interaction.
+    """
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+    model.eval()
+    return model, processor
+
+
+with st.spinner("Loading CLIP model for image evaluation..."):
+    clip_model, clip_processor = load_clip_model()
 
 
 # =========================================================
@@ -343,13 +362,51 @@ def create_placeholder_image() -> Image.Image:
     image = Image.new("RGB", (768, 512), color=(210, 210, 230))
     return image
 
+# =========================================================
+# CLIP SCORE (Image-Text Alignment Evaluation)
+# =========================================================
+def compute_clip_score(image, text_prompt: str):
+    """
+    Computes CLIP score: cosine similarity between image and text embeddings.
+    Returns a score from 0 to 1 (higher = better alignment).
+    """
+    try:
+        inputs = clip_processor(
+            text=[text_prompt],
+            images=image,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=77
+        )
+
+        with torch.no_grad():
+            outputs = clip_model(**inputs)
+            image_embeds = outputs.image_embeds
+            text_embeds = outputs.text_embeds
+
+            # Normalize and compute cosine similarity
+            image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
+            text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+            similarity = (image_embeds @ text_embeds.T).item()
+
+        return round(similarity, 4)
+
+    except Exception as e:
+        st.warning(f"CLIP scoring failed: {e}")
+        return None
+
 
 # =========================================================
 # EVALUATION
 # =========================================================
 def evaluate_story(story_data: dict, language: str) -> dict:
     """
-    Evaluate generated story using Groq LLaMA model.
+    Evaluates story using a DIFFERENT model than the generator
+    to avoid self-evaluation bias (LLM-as-judge best practice).
+    
+    Generator: llama-3.3-70b-versatile
+    Evaluator: openai/gpt-oss-120b
     """
 
     lang_instruction = "Respond in English."
@@ -384,8 +441,9 @@ Story Text:
 {story_text}
 """
 
+
     response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",  # نموذج مختلف لتجنب التحيز الذاتي
         messages=[
             {"role": "user", "content": eval_prompt}
         ],
@@ -478,18 +536,19 @@ def run_storytelling_pipeline(
 ):
     """
     Full pipeline:
-    1. Story generation
-    2. Image generation
-    3. Evaluation
+    1. Story generation (with latency tracking)
+    2. Image generation (with latency tracking + CLIP scoring)
+    3. Evaluation (using different LLM)
     """
 
     progress_bar = st.progress(0)
     status_box = st.empty()
 
-    # Step 1: Generate story
+    # ── Step 1: Generate story (with timing) ──
     status_box.info("Generating story with LLaMA-3...")
     progress_bar.progress(10)
 
+    story_start = time.time()
     story_data = generate_story(
         genre=genre,
         age_group=age_group,
@@ -498,11 +557,14 @@ def run_storytelling_pipeline(
         num_scenes=int(num_scenes),
         language=language
     )
+    story_gen_time = round(time.time() - story_start, 2)
 
     progress_bar.progress(20)
 
-    # Step 2: Generate images
+    # ── Step 2: Generate images + CLIP scoring (with timing) ──
     images_with_captions = []
+    clip_scores = []
+    image_gen_times = []
     scenes = story_data.get("scenes", [])
     total_scenes = len(scenes)
 
@@ -520,23 +582,34 @@ def run_storytelling_pipeline(
             f"children book illustration, beautiful, colorful, soft lighting"
         )
 
+        # Measure image generation time
+        img_start = time.time()
         image = generate_image_hf(full_prompt)
+        img_end = time.time()
+        image_gen_times.append(round(img_end - img_start, 2))
 
         if image is None:
             image = create_placeholder_image()
+            clip_score = None
             caption = f"Scene {scene.get('scene_number')}: {scene.get('title')} (image unavailable)"
         else:
-            caption = f"Scene {scene.get('scene_number')}: {scene.get('title')}"
+            # Compute CLIP score
+            clip_score = compute_clip_score(image, image_prompt)
+            score_text = f"CLIP: {clip_score}" if clip_score is not None else "CLIP: N/A"
+            caption = f"Scene {scene.get('scene_number')}: {scene.get('title')} | {score_text}"
+
+        clip_scores.append(clip_score)
 
         images_with_captions.append(
             {
                 "image": image,
                 "caption": caption,
-                "prompt": full_prompt
+                "prompt": full_prompt,
+                "clip_score": clip_score
             }
         )
 
-    # Step 3: Evaluation
+    # ── Step 3: Evaluation ──
     status_box.info("Evaluating story quality...")
     progress_bar.progress(85)
 
@@ -545,8 +618,16 @@ def run_storytelling_pipeline(
     progress_bar.progress(100)
     status_box.success("Done!")
 
-    return story_data, images_with_captions, eval_data
+    # Performance metrics
+    performance_data = {
+        "story_gen_time": story_gen_time,
+        "image_gen_times": image_gen_times,
+        "total_image_time": round(sum(image_gen_times), 2),
+        "total_pipeline_time": round(story_gen_time + sum(image_gen_times), 2),
+        "clip_scores": clip_scores
+    }
 
+    return story_data, images_with_captions, eval_data, performance_data
 
 # =========================================================
 # SESSION STATE
@@ -559,6 +640,9 @@ if "images_with_captions" not in st.session_state:
 
 if "eval_data" not in st.session_state:
     st.session_state.eval_data = None
+
+if "performance_data" not in st.session_state:
+    st.session_state.performance_data = None
 
 
 # =========================================================
@@ -660,7 +744,7 @@ if generate_button:
         st.error("Please enter at least one main character.")
     else:
         try:
-            story_data, images_with_captions, eval_data = run_storytelling_pipeline(
+            story_data, images_with_captions, eval_data, performance_data = run_storytelling_pipeline(
                 genre=genre,
                 age_group=age_group,
                 theme=theme,
@@ -672,6 +756,7 @@ if generate_button:
             st.session_state.story_data = story_data
             st.session_state.images_with_captions = images_with_captions
             st.session_state.eval_data = eval_data
+            st.session_state.performance_data = performance_data  # ← جديد
 
         except Exception as e:
             st.error(f"Pipeline failed: {e}")
@@ -683,6 +768,7 @@ if generate_button:
 story_data = st.session_state.story_data
 images_with_captions = st.session_state.images_with_captions
 eval_data = st.session_state.eval_data
+performance_data = st.session_state.performance_data
 
 tab_story, tab_images, tab_eval, tab_json, tab_downloads = st.tabs(
     [
@@ -734,7 +820,12 @@ with tab_eval:
     if eval_data is None:
         st.info("Evaluation results will appear here after generation.")
     else:
-        st.subheader("Quantitative Evaluation")
+        # ─── 4A: Text Quality (LLM-as-Judge) ───
+        st.subheader("📊 Text Quality Evaluation (LLM-as-Judge)")
+        st.caption(
+            "*Evaluator model: `openai/gpt-oss-120b` "
+            "(different from generator to reduce self-bias)*"
+        )
 
         metrics = {
             "Coherence": eval_data.get("coherence_score"),
@@ -745,13 +836,11 @@ with tab_eval:
         }
 
         metric_cols = st.columns(len(metrics))
-
         for col, (metric_name, score) in zip(metric_cols, metrics.items()):
             with col:
                 st.metric(metric_name, f"{score}/10")
 
         st.markdown("### Score Table")
-
         for metric_name, score in metrics.items():
             st.markdown(
                 f"""
@@ -763,7 +852,55 @@ with tab_eval:
                 unsafe_allow_html=True
             )
 
-        st.subheader("Qualitative Evaluation")
+        # ─── 4B: Image Quality (CLIP Score) ───
+        st.markdown("---")
+        st.subheader("🖼️ Image Quality Evaluation (CLIP Score)")
+        st.caption(
+            "*CLIP measures image-text alignment "
+            "(0=poor, 1=perfect match)*"
+        )
+
+        if images_with_captions:
+            clip_scores_list = [item.get("clip_score") for item in images_with_captions]
+            valid_clip_scores = [s for s in clip_scores_list if s is not None]
+
+            clip_table_md = "| Scene | CLIP Score | Quality |\n|-------|-----------|--------|\n"
+            for i, score in enumerate(clip_scores_list):
+                if score is not None:
+                    if score >= 0.30:
+                        quality = "Excellent"
+                    elif score >= 0.25:
+                        quality = "Good"
+                    elif score >= 0.20:
+                        quality = "Fair"
+                    else:
+                        quality = "Poor"
+                    clip_table_md += f"| Scene {i+1} | {score} | {quality} |\n"
+                else:
+                    clip_table_md += f"| Scene {i+1} | N/A | - |\n"
+
+            st.markdown(clip_table_md)
+
+            if valid_clip_scores:
+                avg_clip = round(sum(valid_clip_scores) / len(valid_clip_scores), 4)
+                st.markdown(f"**Average CLIP Score:** {avg_clip}")
+
+        # ─── 4C: Performance Metrics ───
+        st.markdown("---")
+        st.subheader("⚡ Performance Metrics (Latency)")
+
+        if performance_data:
+            perf_md = "| Stage | Time (seconds) |\n|-------|----------------|\n"
+            perf_md += f"| Story Generation | {performance_data['story_gen_time']} s |\n"
+            for i, t in enumerate(performance_data['image_gen_times']):
+                perf_md += f"| Image {i+1} Generation | {t} s |\n"
+            perf_md += f"| **Total Image Time** | **{performance_data['total_image_time']} s** |\n"
+            perf_md += f"| **Total Pipeline Time** | **{performance_data['total_pipeline_time']} s** |\n"
+            st.markdown(perf_md)
+
+        # ─── 4D: Qualitative Evaluation ───
+        st.markdown("---")
+        st.subheader("📝 Qualitative Evaluation")
 
         st.markdown("### Strengths")
         for item in eval_data.get("strengths", []):
@@ -777,16 +914,32 @@ with tab_eval:
         for item in eval_data.get("improvement_suggestions", []):
             st.write(f"- {item}")
 
+        # ─── 4E: System Limitations (Full version) ───
         st.markdown("---")
-
         st.markdown(
             """
-            ## System-Level Limitations
+            ## System-Level Limitations & Discussion
 
-            - **Hallucination:** LLMs may generate factually inconsistent plot elements.
-            - **Visual Inconsistency:** Characters may appear differently across scenes because diffusion models do not guarantee perfect cross-scene identity consistency.
-            - **Computational Cost:** Image generation may be slow depending on Hugging Face API availability.
-            - **Age Calibration:** Age-appropriateness depends on prompt adherence and is not a certified child-safety filter.
+            ### Text Generation Limitations
+            - **Hallucination:** LLMs may generate factually inconsistent plot elements
+            - **Age Calibration:** Age-appropriateness relies on prompt adherence, not verified filtering
+            - **Cultural Bias:** Training data may bias narrative styles toward Western storytelling
+
+            ### Image Generation Limitations
+            - **Visual Inconsistency:** Characters may appear differently across scenes (no cross-scene memory in diffusion models)
+            - **Prompt Adherence:** FLUX.1-schnell prioritizes speed over fidelity; complex prompts may be partially rendered
+            - **Computational Cost:** HF inference can take 20-60 sec/image on free-tier APIs
+
+            ### Evaluation Limitations
+            - **LLM-as-Judge Bias:** Although we use a different model for evaluation, LLM judges still share systematic biases (verbosity preference, position bias)
+            - **CLIP Score Limitations:** CLIP was trained on internet images; it may underestimate quality for stylized children's illustrations
+            - **No Human Evaluation:** Production deployment would require human raters for ground-truth quality assessment
+
+            ### Mitigations Applied
+            - Used different evaluator model (gpt-oss-120b) vs generator (llama-3.3-70b)
+            - Added objective CLIP score for image-text alignment
+            - Tracked latency for reproducibility
+            - Character profile reused across scenes to improve consistency
             """
         )
 
