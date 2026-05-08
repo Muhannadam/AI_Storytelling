@@ -339,10 +339,8 @@ Write the full story now.
 # =========================================================
 # IMAGE GENERATION
 # =========================================================
-"""def generate_image_hf(prompt: str):
-    """
-    Generate image using Hugging Face InferenceClient.
-    """
+"""
+def generate_image_hf(prompt: str):
     try:
         image = hf_client.text_to_image(
             prompt,
@@ -350,6 +348,21 @@ Write the full story now.
         )
         return image.convert("RGB")
 
+    except Exception as e:
+        st.warning(f"Image generation failed: {e}")
+        return None"""
+
+import requests
+from urllib.parse import quote
+
+def generate_image_hf(prompt: str):
+    try:
+        encoded_prompt = quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=512&nologo=true"
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        image = Image.open(BytesIO(response.content))
+        return image.convert("RGB")
     except Exception as e:
         st.warning(f"Image generation failed: {e}")
         return None
@@ -360,29 +373,9 @@ def create_placeholder_image() -> Image.Image:
     Placeholder image if HF image generation fails.
     """
     image = Image.new("RGB", (768, 512), color=(210, 210, 230))
-    return image"""
-import requests
-from urllib.parse import quote
+    return image
 
-def generate_image_hf(prompt: str):
-    """
-    Generate image using Pollinations.ai (free, no API key needed).
-    Uses FLUX model under the hood.
-    """
-    try:
-        encoded_prompt = quote(prompt[:1500])  # حد أقصى للأمان
-        url = (
-            f"https://image.pollinations.ai/prompt/{encoded_prompt}"
-            f"?width=768&height=512&nologo=true&model=flux"
-        )
-        response = requests.get(url, timeout=90)
-        response.raise_for_status()
-        image = Image.open(BytesIO(response.content))
-        return image.convert("RGB")
 
-    except Exception as e:
-        st.warning(f"Image generation failed: {e}")
-        return None
 
 # =========================================================
 # CLIP SCORE (Image-Text Alignment Evaluation)
