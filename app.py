@@ -346,7 +346,7 @@ def generate_image_hf(prompt: str):
     try:
         image = hf_client.text_to_image(
             prompt,
-            model="stabilityai/stable-diffusion-xl-base-1.0"
+            model="Kwai-Kolors/Kolors"
         )
         return image.convert("RGB")
 
