@@ -445,7 +445,7 @@ Story Text:
 
 
     response = groq_client.chat.completions.create(
-        model="openai/gpt-oss-120b",  # نموذج مختلف لتجنب التحيز الذاتي
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "user", "content": eval_prompt}
         ],
@@ -758,7 +758,7 @@ if generate_button:
             st.session_state.story_data = story_data
             st.session_state.images_with_captions = images_with_captions
             st.session_state.eval_data = eval_data
-            st.session_state.performance_data = performance_data  # ← جديد
+            st.session_state.performance_data = performance_data
 
         except Exception as e:
             st.error(f"Pipeline failed: {e}")
@@ -823,7 +823,7 @@ with tab_eval:
         st.info("Evaluation results will appear here after generation.")
     else:
         # ─── 4A: Text Quality (LLM-as-Judge) ───
-        st.subheader("📊 Text Quality Evaluation (LLM-as-Judge)")
+        st.subheader("Text Quality Evaluation (LLM-as-Judge)")
         st.caption(
             "*Evaluator model: `openai/gpt-oss-120b` "
             "(different from generator to reduce self-bias)*"
@@ -856,7 +856,7 @@ with tab_eval:
 
         # ─── 4B: Image Quality (CLIP Score) ───
         st.markdown("---")
-        st.subheader("🖼️ Image Quality Evaluation (CLIP Score)")
+        st.subheader("Image Quality Evaluation (CLIP Score)")
         st.caption(
             "*CLIP measures image-text alignment "
             "(0=poor, 1=perfect match)*"
@@ -902,7 +902,7 @@ with tab_eval:
 
         # ─── 4D: Qualitative Evaluation ───
         st.markdown("---")
-        st.subheader("📝 Qualitative Evaluation")
+        st.subheader("Qualitative Evaluation")
 
         st.markdown("### Strengths")
         for item in eval_data.get("strengths", []):
