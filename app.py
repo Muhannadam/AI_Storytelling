@@ -339,17 +339,17 @@ Write the full story now.
 # =========================================================
 # IMAGE GENERATION
 # =========================================================
-import requests
-from urllib.parse import quote
-
 def generate_image_hf(prompt: str):
+    """
+    Generate image using Hugging Face InferenceClient.
+    """
     try:
-        encoded_prompt = quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=512&nologo=true"
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
-        image = Image.open(BytesIO(response.content))
+        image = hf_client.text_to_image(
+            prompt,
+            model="black-forest-labs/FLUX.1-schnell"
+        )
         return image.convert("RGB")
+
     except Exception as e:
         st.warning(f"Image generation failed: {e}")
         return None
