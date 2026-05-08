@@ -1,5 +1,6 @@
 streamlit
 groq
 huggingface_hub
-pillow
-requests
+Pillow
+torch
+transformers
