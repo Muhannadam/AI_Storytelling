@@ -17,7 +17,6 @@ from transformers import CLIPProcessor, CLIPModel
 # =========================================================
 st.set_page_config(
     page_title="AI Storytelling System",
-    page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -920,7 +919,7 @@ with tab_eval:
 
         # ─── 4C: Performance Metrics ───
         st.markdown("---")
-        st.subheader("⚡ Performance Metrics (Latency)")
+        st.subheader("Performance Metrics (Latency)")
 
         if performance_data:
             perf_md = "| Stage | Time (seconds) |\n|-------|----------------|\n"
